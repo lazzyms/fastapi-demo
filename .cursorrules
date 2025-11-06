@@ -1,0 +1,238 @@
+# FastAPI Project Rules for AI Assistants
+
+## Project Overview
+This is a FastAPI project with SQLite, SQLAlchemy, Alembic, and Pydantic. It follows a layered architecture pattern.
+
+## Architecture Layers (MUST FOLLOW)
+1. **Models** (`app/models/`) - SQLAlchemy ORM models
+2. **Schemas** (`app/schemas/`) - Pydantic validation models
+3. **CRUD** (`app/crud/`) - Database operations
+4. **API** (`app/api/`) - FastAPI route handlers
+5. **Core** (`app/core/`) - Configuration and database setup
+
+## Adding New Resources - ALWAYS Follow This Pattern
+
+### 1. Create Model (app/models/resource.py)
+- Use SQLAlchemy declarative base
+- Import from `app.core.database import Base`
+- Add `__tablename__`
+- Use proper column types and constraints
+- Add timestamps if needed: `created_at`, `updated_at`
+
+### 2. Create Schemas (app/schemas/resource.py)
+- Create 4 schemas: Base, Create, Update, Response
+- Use Pydantic v2 syntax: `ConfigDict(from_attributes=True)`
+- Use `model_dump()` not deprecated `dict()`
+- Mark optional fields in Update schema
+
+### 3. Create CRUD (app/crud/resource.py)
+- Implement: get, get_multi, create, update, delete
+- Return proper types (Optional, List)
+- Use `model_dump(exclude_unset=True)` for updates
+- Always commit and refresh after modifications
+
+### 4. Create API Routes (app/api/resources.py)
+- Use APIRouter with prefix and tags
+- Use proper HTTP status codes (201 for POST, 204 for DELETE)
+- Use Depends(get_db) for database sessions
+- Raise HTTPException for errors (404, 400, etc.)
+- Add response_model to all endpoints
+
+### 5. Register Everything
+- Update `app/models/__init__.py`
+- Update `app/schemas/__init__.py`
+- Update `app/crud/__init__.py`
+- Update `app/api/__init__.py`
+- Register router in `app/main.py`
+
+### 6. Generate Migration
+- Run: `uv run alembic revision --autogenerate -m "description"`
+- Review generated migration file
+- Apply: `uv run alembic upgrade head`
+
+## Code Style Requirements
+
+### Models
+```python
+from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.sql import func
+from app.core.database import Base
+
+class Resource(Base):
+    __tablename__ = "resources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+```
+
+### Schemas
+```python
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
+
+class ResourceBase(BaseModel):
+    name: str
+
+class ResourceCreate(ResourceBase):
+    pass
+
+class ResourceUpdate(BaseModel):
+    name: Optional[str] = None
+
+class ResourceResponse(ResourceBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+```
+
+### CRUD
+```python
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.models.resource import Resource
+from app.schemas.resource import ResourceCreate, ResourceUpdate
+
+def get_resource(db: Session, resource_id: int) -> Optional[Resource]:
+    return db.query(Resource).filter(Resource.id == resource_id).first()
+
+def create_resource(db: Session, resource: ResourceCreate) -> Resource:
+    db_resource = Resource(**resource.model_dump())
+    db.add(db_resource)
+    db.commit()
+    db.refresh(db_resource)
+    return db_resource
+```
+
+### API Routes
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+from app.crud import resource as crud
+from app.schemas.resource import ResourceCreate, ResourceResponse
+
+router = APIRouter(prefix="/resources", tags=["resources"])
+
+@router.post("/", response_model=ResourceResponse, status_code=status.HTTP_201_CREATED)
+def create_resource(resource: ResourceCreate, db: Session = Depends(get_db)):
+    return crud.create_resource(db=db, resource=resource)
+
+@router.get("/{resource_id}", response_model=ResourceResponse)
+def read_resource(resource_id: int, db: Session = Depends(get_db)):
+    db_resource = crud.get_resource(db, resource_id=resource_id)
+    if not db_resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return db_resource
+```
+
+## Database Migrations - REQUIRED AFTER MODEL CHANGES
+
+### After Creating/Modifying Models:
+1. Generate migration: `uv run alembic revision --autogenerate -m "description"`
+2. Review file in `alembic/versions/`
+3. Apply migration: `uv run alembic upgrade head`
+
+### Migration Commands:
+- Create: `make db-migrate MSG="description"`
+- Apply: `make db-upgrade`
+- Current version: `uv run alembic current`
+- History: `uv run alembic history`
+- Rollback: `uv run alembic downgrade -1`
+
+## Common Patterns
+
+### Adding Relationships:
+```python
+# In Post model
+author_id = Column(Integer, ForeignKey("users.id"))
+author = relationship("User", back_populates="posts")
+
+# In User model
+posts = relationship("Post", back_populates="author")
+```
+
+### Adding Search/Filter:
+```python
+def get_resources(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None
+) -> List[Resource]:
+    query = db.query(Resource)
+    if search:
+        query = query.filter(Resource.name.contains(search))
+    return query.offset(skip).limit(limit).all()
+```
+
+### Query Parameters in API:
+```python
+@router.get("/", response_model=List[ResourceResponse])
+def read_resources(
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    return crud.get_resources(db, skip=skip, limit=limit, search=search)
+```
+
+## Important Notes
+
+1. **NEVER** skip database migrations after model changes
+2. **ALWAYS** use `model_dump()` not `dict()` (Pydantic v2)
+3. **ALWAYS** use `ConfigDict(from_attributes=True)` not `orm_mode=True`
+4. **ALWAYS** raise HTTPException for errors, don't return None
+5. **ALWAYS** use proper status codes (201, 204, 404, etc.)
+6. **ALWAYS** add type hints
+7. **ALWAYS** update `__init__.py` files when adding modules
+8. **ALWAYS** commit and refresh after DB modifications
+
+## Testing Pattern
+
+```python
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_create_resource():
+    response = client.post(
+        "/resources/",
+        json={"name": "Test Resource"}
+    )
+    assert response.status_code == 201
+    assert response.json()["name"] == "Test Resource"
+```
+
+## File Locations
+- Models: `app/models/*.py`
+- Schemas: `app/schemas/*.py`
+- CRUD: `app/crud/*.py`
+- API: `app/api/*.py`
+- Config: `app/core/config.py`
+- Database: `app/core/database.py`
+- Main app: `app/main.py`
+- Tests: `tests/*.py`
+- Migrations: `alembic/versions/*.py`
+
+## Quick Commands
+- Start: `make dev`
+- Test: `make test`
+- Clean: `make clean`
+- Help: `make help`
+- Setup: `bash setup.sh`
+
+## Documentation
+- README.md - Full user documentation
+- DEVELOPMENT.md - Detailed development guide
+- QUICK_START.md - Quick setup guide
+
+## When Asked to Add Features
+1. Ask if they want a new resource or modify existing
+2. Follow the 6-step pattern above
+3. Generate and apply migrations
+4. Update tests if appropriate
+5. Suggest testing via `/docs` endpoint
+
+Remember: This is an interview project - code should be clean, well-structured, and follow best practices!

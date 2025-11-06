@@ -1,0 +1,344 @@
+# Cline AI Assistant Rules for FastAPI Demo Project
+
+## Project Context
+FastAPI interview skeleton project with SQLite, SQLAlchemy ORM, Alembic migrations, and Pydantic validation. Follows layered architecture pattern for clean, maintainable code.
+
+## Architecture Pattern (MANDATORY)
+
+All features MUST follow this exact 6-layer pattern:
+
+1. **Model Layer** (`app/models/`) - SQLAlchemy database models
+2. **Schema Layer** (`app/schemas/`) - Pydantic validation/serialization
+3. **CRUD Layer** (`app/crud/`) - Database operations
+4. **API Layer** (`app/api/`) - FastAPI route handlers
+5. **Registration** - Update `__init__.py` files and `app/main.py`
+6. **Migration** - Generate and apply Alembic migration
+
+## Code Style Requirements
+
+### Python Version & Dependencies
+- Python 3.11+
+- Use `uv` for package management
+- Pydantic v2 syntax only
+- SQLAlchemy 2.0+ syntax
+
+### Pydantic v2 (IMPORTANT)
+```python
+# ✅ CORRECT (v2)
+from pydantic import BaseModel, ConfigDict
+class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    data = model.model_dump()
+
+# ❌ WRONG (v1 - deprecated)
+class User(BaseModel):
+    class Config:
+        orm_mode = True
+    data = model.dict()
+```
+
+### Models (SQLAlchemy)
+```python
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.core.database import Base
+
+class Resource(Base):
+    __tablename__ = "resources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+```
+
+### Schemas (Pydantic)
+Always create 4 schema classes:
+```python
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
+
+class ResourceBase(BaseModel):
+    """Shared fields"""
+    name: str
+
+class ResourceCreate(ResourceBase):
+    """Fields required for creation"""
+    pass
+
+class ResourceUpdate(BaseModel):
+    """All fields optional for partial updates"""
+    name: Optional[str] = None
+
+class ResourceResponse(ResourceBase):
+    """Fields returned in API responses"""
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+```
+
+### CRUD Operations
+```python
+from typing import List, Optional
+from sqlalchemy.orm import Session
+
+def get_resource(db: Session, resource_id: int) -> Optional[Resource]:
+    return db.query(Resource).filter(Resource.id == resource_id).first()
+
+def get_resources(db: Session, skip: int = 0, limit: int = 100) -> List[Resource]:
+    return db.query(Resource).offset(skip).limit(limit).all()
+
+def create_resource(db: Session, resource: ResourceCreate) -> Resource:
+    db_resource = Resource(**resource.model_dump())
+    db.add(db_resource)
+    db.commit()
+    db.refresh(db_resource)
+    return db_resource
+
+def update_resource(db: Session, resource_id: int, resource: ResourceUpdate) -> Optional[Resource]:
+    db_resource = get_resource(db, resource_id)
+    if not db_resource:
+        return None
+    update_data = resource.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_resource, field, value)
+    db.commit()
+    db.refresh(db_resource)
+    return db_resource
+
+def delete_resource(db: Session, resource_id: int) -> bool:
+    db_resource = get_resource(db, resource_id)
+    if not db_resource:
+        return False
+    db.delete(db_resource)
+    db.commit()
+    return True
+```
+
+### API Routes
+```python
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+
+router = APIRouter(prefix="/resources", tags=["resources"])
+
+@router.post("/", response_model=ResourceResponse, status_code=status.HTTP_201_CREATED)
+def create_resource(resource: ResourceCreate, db: Session = Depends(get_db)):
+    return crud.create_resource(db=db, resource=resource)
+
+@router.get("/", response_model=List[ResourceResponse])
+def read_resources(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    return crud.get_resources(db, skip=skip, limit=limit)
+
+@router.get("/{resource_id}", response_model=ResourceResponse)
+def read_resource(resource_id: int, db: Session = Depends(get_db)):
+    db_resource = crud.get_resource(db, resource_id=resource_id)
+    if not db_resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return db_resource
+
+@router.patch("/{resource_id}", response_model=ResourceResponse)
+def update_resource(resource_id: int, resource: ResourceUpdate, db: Session = Depends(get_db)):
+    db_resource = crud.update_resource(db, resource_id=resource_id, resource=resource)
+    if not db_resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return db_resource
+
+@router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resource(resource_id: int, db: Session = Depends(get_db)):
+    if not crud.delete_resource(db, resource_id=resource_id):
+        raise HTTPException(status_code=404, detail="Resource not found")
+```
+
+## HTTP Status Codes (MANDATORY)
+
+- `200 OK` - Successful GET, PATCH
+- `201 Created` - Successful POST
+- `204 No Content` - Successful DELETE
+- `400 Bad Request` - Validation errors, duplicates
+- `404 Not Found` - Resource doesn't exist
+- `422 Unprocessable Entity` - Pydantic validation error (automatic)
+
+## Database Migrations (CRITICAL)
+
+ALWAYS generate and apply migrations after model changes:
+
+```bash
+# After creating/modifying ANY model:
+uv run alembic revision --autogenerate -m "Descriptive message"
+
+# Review the generated file in alembic/versions/
+
+# Apply migration:
+uv run alembic upgrade head
+```
+
+### Migration Checklist
+- [ ] Modified/created model in `app/models/`
+- [ ] Generated migration: `make db-migrate MSG="description"`
+- [ ] Reviewed migration file
+- [ ] Applied migration: `make db-upgrade`
+- [ ] Verified database schema
+
+## Adding New Features - Step-by-Step
+
+### When User Asks to Add a Resource (e.g., "Add posts"):
+
+1. **Create Model** - `app/models/post.py`
+   - Define table structure
+   - Add relationships if needed
+   - Update `app/models/__init__.py`
+
+2. **Create Schemas** - `app/schemas/post.py`
+   - Create Base, Create, Update, Response schemas
+   - Update `app/schemas/__init__.py`
+
+3. **Create CRUD** - `app/crud/post.py`
+   - Implement get, get_multi, create, update, delete
+   - Update `app/crud/__init__.py`
+
+4. **Create API** - `app/api/posts.py`
+   - Create router with all endpoints
+   - Update `app/api/__init__.py`
+
+5. **Register Router** - `app/main.py`
+   ```python
+   from app.api.posts import router as posts_router
+   app.include_router(posts_router)
+   ```
+
+6. **Generate Migration**
+   ```bash
+   uv run alembic revision --autogenerate -m "Add posts table"
+   uv run alembic upgrade head
+   ```
+
+7. **Suggest Testing** - Point user to `/docs`
+
+## Testing Requirements
+
+When adding features, consider suggesting tests:
+
+- **Unit tests**: `tests/unit/test_schemas.py`, `tests/unit/test_crud.py`
+- **Integration tests**: `tests/integration/test_api.py`
+- **E2E tests**: `tests/e2e/test_scenarios.py`
+
+Run tests: `make test` or `uv run pytest`
+
+## Common Patterns
+
+### Adding Relationships
+```python
+# One-to-Many: User -> Posts
+class User(Base):
+    posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
+
+class Post(Base):
+    author_id = Column(Integer, ForeignKey("users.id"))
+    author = relationship("User", back_populates="posts")
+```
+
+### Adding Search/Filtering
+```python
+def get_resources(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None
+) -> List[Resource]:
+    query = db.query(Resource)
+    if search:
+        query = query.filter(Resource.name.contains(search))
+    return query.offset(skip).limit(limit).all()
+```
+
+## Error Handling
+
+ALWAYS use HTTPException for API errors:
+```python
+from fastapi import HTTPException, status
+
+# Not found
+raise HTTPException(status_code=404, detail="Resource not found")
+
+# Bad request
+raise HTTPException(status_code=400, detail="Email already registered")
+
+# Never return None or False from API endpoints
+```
+
+## File Structure Rules
+
+```
+app/
+├── api/           # One file per resource
+├── core/          # Don't modify unless config changes
+├── crud/          # One file per model
+├── models/        # One file per table
+└── schemas/       # One file per resource
+```
+
+## Commands Quick Reference
+
+```bash
+# Development
+make dev                    # Start server
+make help                   # Show all commands
+
+# Database
+make db-migrate MSG="..."   # Create migration
+make db-upgrade             # Apply migrations
+make db-init               # First-time setup
+
+# Testing
+make test                   # Run all tests
+uv run pytest tests/unit/   # Unit tests only
+
+# Cleanup
+make clean                  # Remove db and cache
+```
+
+## Communication with User
+
+1. **Acknowledge request**: Confirm what you're building
+2. **List steps**: Show what you'll create
+3. **Create files**: Follow the 6-layer pattern
+4. **Generate migration**: Always remind about migrations
+5. **Provide testing**: Suggest testing via `/docs`
+6. **Summary**: List what was created
+
+## Quality Checklist
+
+Before responding "done":
+- [ ] All 4 layers created (model, schema, crud, api)
+- [ ] All `__init__.py` files updated
+- [ ] Router registered in `app/main.py`
+- [ ] Migration mentioned/generated
+- [ ] Type hints on all functions
+- [ ] Proper status codes used
+- [ ] Error handling with HTTPException
+- [ ] Pydantic v2 syntax used
+- [ ] Documentation strings added
+
+## Important Reminders
+
+1. **NEVER** use Pydantic v1 syntax (`dict()`, `orm_mode`)
+2. **ALWAYS** generate migrations after model changes
+3. **NEVER** return None from API - raise HTTPException
+4. **ALWAYS** use `model_dump()` not `dict()`
+5. **ALWAYS** use proper HTTP status codes
+6. **ALWAYS** type hint function signatures
+7. **ALWAYS** update `__init__.py` files
+8. **NEVER** skip any layer of the architecture
+
+## Reference Documentation
+
+- Full docs: `README.md`
+- Dev guide: `DEVELOPMENT.md`
+- Quick start: `QUICK_START.md`
+- AI guide: `CLAUDE.md`
+- Test docs: `tests/README.md`
+
+This is an interview project - prioritize clean, maintainable, well-structured code!
