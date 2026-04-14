@@ -1,4 +1,5 @@
 import logging
+import logging.config
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,6 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import users_router, gmail_router
 from app.core.config import settings
+from app.services.gmail import get_gmail_service, ensure_custom_labels
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +22,7 @@ async def lifespan(app: FastAPI):
     """Run startup tasks before the app begins serving requests."""
     # Ensure custom Gmail labels exist on every startup
     try:
-        from app.services.gmail import get_gmail_service, ensure_custom_labels
-
+        logger.info("Starting up FastAPI Demo application...")
         service = get_gmail_service()
         sync_result = ensure_custom_labels(service)
         logger.info(
