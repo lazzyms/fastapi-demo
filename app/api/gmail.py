@@ -2,7 +2,11 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from app.models.emails import GmailLabelResponse, LabelsSyncResponse, ThreadSyncResponse
+from app.schemas.emails import (
+    GmailLabelResponse,
+    LabelsSyncResponse,
+    ThreadSyncResponse,
+)
 from app.services.gmail import (
     ensure_custom_labels,
     fetch_threads_last_10_days,

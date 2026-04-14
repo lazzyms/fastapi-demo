@@ -29,3 +29,21 @@ class LabelsSyncResponse(BaseModel):
 class ThreadSyncResponse(BaseModel):
     message: str
     status: str
+
+
+class ThreadMessage(BaseModel):
+    message_id: str
+    thread_id: str
+    sender: str
+    date: str
+    subject: str
+    body: str
+    position: int
+
+
+class ThreadProcessingResult(BaseModel):
+    thread_id: str
+    message_count: int
+    summary: str
+    label: str
+    label_id: Optional[str] = None

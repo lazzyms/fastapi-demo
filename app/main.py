@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     """Run startup tasks before the app begins serving requests."""
     # Ensure custom Gmail labels exist on every startup
     try:
-
+        logger.info("Starting up FastAPI Demo application...")
         service = get_gmail_service()
         sync_result = ensure_custom_labels(service)
         logger.info(
