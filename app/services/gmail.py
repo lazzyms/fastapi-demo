@@ -1,6 +1,7 @@
 import base64
 import binascii
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from google.oauth2.credentials import Credentials
@@ -205,15 +206,25 @@ def apply_label_to_thread(service: Any, thread_id: str, label_id: str) -> dict:
     )
 
 
-def fetch_history_since(service: Any, start_history_id: str) -> list[str]:
+@dataclass(frozen=True)
+class HistoryFetchResult:
+    """Result of a Gmail History API fetch."""
+
+    thread_ids: list[str]
+    latest_history_id: str | None
+
+
+def fetch_history_since(service: Any, start_history_id: str) -> HistoryFetchResult:
     """Return unique thread IDs for messages added since start_history_id.
 
     Uses the Gmail History API with historyTypes=messageAdded so we only
     react to new incoming messages, not label changes or deletions.
+    Raises HttpError if any History API call fails.
     """
     thread_ids: list[str] = []
     seen: set[str] = set()
     page_token: str | None = None
+    latest_history_id: str | None = None
 
     while True:
         request_kwargs: dict = {
@@ -230,7 +241,13 @@ def fetch_history_since(service: Any, start_history_id: str) -> list[str]:
             logger.error(
                 "History API error (startHistoryId=%s): %s", start_history_id, exc
             )
-            break
+            raise
+
+        latest_history_id = (
+            str(response.get("historyId"))
+            if response.get("historyId")
+            else latest_history_id
+        )
 
         for history_record in response.get("history", []):
             for msg_added in history_record.get("messagesAdded", []):
@@ -243,7 +260,10 @@ def fetch_history_since(service: Any, start_history_id: str) -> list[str]:
         if not page_token:
             break
 
-    return thread_ids
+    return HistoryFetchResult(
+        thread_ids=thread_ids,
+        latest_history_id=latest_history_id,
+    )
 
 
 def fetch_threads_last_10_days(service: Any) -> None:
