@@ -10,18 +10,15 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.crud import app_state as crud_app_state
 from app.schemas.emails import (
-    GmailLabelResponse,
-    LabelsSyncResponse,
     PubSubWebhookPayload,
     ThreadSyncResponse,
     WebhookAcceptedResponse,
 )
 from app.services.gmail import (
-    ensure_custom_labels,
     fetch_history_since,
     fetch_threads_last_10_days,
+    get_label_name_map,
     get_gmail_service,
-    list_gmail_labels,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,6 +105,8 @@ def _process_new_threads(service: Any, history_id: str, db: Session) -> None:
     thread_ids = fetch_history_since(service, last_history_id)
     logger.info("Found %d new thread(s) to process.", len(thread_ids))
 
+    label_name_map = get_label_name_map(service)
+
     for thread_id in thread_ids:
         try:
             thread = (
@@ -120,7 +119,12 @@ def _process_new_threads(service: Any, history_id: str, db: Session) -> None:
 
             from app.agents.thread_pipeline import process_thread  # noqa: PLC0415
 
-            result = process_thread(service, thread_id, raw_messages)
+            result = process_thread(
+                service,
+                thread_id,
+                raw_messages,
+                label_name_map,
+            )
             logger.info(
                 "Webhook → thread %s processed: label='%s' (%d messages)",
                 thread_id,

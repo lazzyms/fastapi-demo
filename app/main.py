@@ -1,5 +1,4 @@
 import logging
-import logging.config
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,11 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import users_router, gmail_router
 from app.core.config import settings
 from app.services.gmail import get_gmail_service, ensure_custom_labels
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s:     %(name)s - %(message)s",
-)
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 import base64
+import binascii
 import logging
-from email import message_from_bytes
 from typing import Any
 
 from google.oauth2.credentials import Credentials
@@ -56,6 +56,11 @@ def list_gmail_labels(service: Any) -> list[dict]:
     """Return all labels for the authenticated Gmail account."""
     response = service.users().labels().list(userId="me").execute()
     return response.get("labels", [])
+
+
+def get_label_name_map(service: Any) -> dict[str, str]:
+    """Return a mapping of Gmail label name -> label ID."""
+    return {label["name"]: label["id"] for label in list_gmail_labels(service)}
 
 
 def create_gmail_label(service: Any, name: str) -> dict:
@@ -153,9 +158,15 @@ def _extract_body(payload: dict) -> str:
     if mime_type == "text/plain":
         data = payload.get("body", {}).get("data", "")
         if data:
-            return base64.urlsafe_b64decode(data + "==").decode(
-                "utf-8", errors="replace"
-            )
+            # Gmail returns unpadded base64url; restore required padding first.
+            padded_data = data + ("=" * (-len(data) % 4))
+            try:
+                return base64.urlsafe_b64decode(padded_data).decode(
+                    "utf-8", errors="replace"
+                )
+            except (binascii.Error, ValueError) as exc:
+                logger.warning("Failed to decode Gmail message body: %s", exc)
+                return ""
         return ""
 
     # Multipart: recurse into parts, prefer text/plain
@@ -171,13 +182,16 @@ def _extract_body(payload: dict) -> str:
     return ""
 
 
-def get_label_id_by_name(service: Any, label_name: str) -> str | None:
-    """Return the Gmail label ID for a given label name, or None if not found."""
-    labels = list_gmail_labels(service)
-    for label in labels:
-        if label["name"] == label_name:
-            return label["id"]
-    return None
+def get_label_id_by_name(
+    service: Any, label_name: str, label_name_map: dict[str, str] | None = None
+) -> str | None:
+    """Return the Gmail label ID for a given label name, or None if not found.
+
+    If label_name_map is provided, this avoids an additional labels.list API call.
+    """
+    if label_name_map is not None:
+        return label_name_map.get(label_name)
+    return get_label_name_map(service).get(label_name)
 
 
 def apply_label_to_thread(service: Any, thread_id: str, label_id: str) -> dict:
@@ -241,6 +255,8 @@ def fetch_threads_last_10_days(service: Any) -> None:
     page_token: str | None = None
     page_number = 0
 
+    label_name_map = get_label_name_map(service)
+
     while True:
         page_number += 1
         request_kwargs: dict = {
@@ -272,7 +288,12 @@ def fetch_threads_last_10_days(service: Any) -> None:
             try:
                 from app.agents.thread_pipeline import process_thread
 
-                result = process_thread(service, thread_meta["id"], raw_messages)
+                result = process_thread(
+                    service,
+                    thread_meta["id"],
+                    raw_messages,
+                    label_name_map,
+                )
                 logger.info(
                     "Thread %s → label='%s' (%d messages)",
                     thread_meta["id"],

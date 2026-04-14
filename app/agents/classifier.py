@@ -32,6 +32,18 @@ class LabelOutput(BaseModel):
 
 
 def _get_llm() -> ChatAnthropic:
+    if not settings.model_name or not settings.model_name.strip():
+        raise ValueError(
+            "MODEL_NAME is not set. Configure MODEL_NAME in your .env file "
+            "to enable email thread classification."
+        )
+
+    if not settings.anthropic_api_key or not settings.anthropic_api_key.strip():
+        raise ValueError(
+            "ANTHROPIC_API_KEY is not set. Configure ANTHROPIC_API_KEY in your "
+            ".env file to enable email thread classification."
+        )
+
     return ChatAnthropic(
         model=settings.model_name,
         api_key=settings.anthropic_api_key,
