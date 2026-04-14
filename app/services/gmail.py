@@ -10,7 +10,10 @@ from app.models.emails import LabelSyncResult, LabelsSyncResponse
 
 logger = logging.getLogger(__name__)
 
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.labels"]
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.labels",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 
 class _StaticTokenCredentials(Credentials):
@@ -117,3 +120,52 @@ def ensure_custom_labels(service: Any) -> LabelsSyncResponse:
         already_existed=sum(1 for r in results if r.existed),
         newly_created=sum(1 for r in results if r.created),
     )
+
+
+def fetch_threads_last_10_days(service: Any) -> None:
+    """Paginate through all Gmail threads from the last 10 days and process each message.
+
+    Fetches 10 threads per page and iterates through every message in each thread.
+    """
+    query = "newer_than:10d"
+    page_token: str | None = None
+    page_number = 0
+
+    while True:
+        page_number += 1
+        request_kwargs: dict = {
+            "userId": "me",
+            "q": query,
+            "maxResults": 10,
+        }
+        if page_token:
+            request_kwargs["pageToken"] = page_token
+
+        response = service.users().threads().list(**request_kwargs).execute()
+        threads = response.get("threads", [])
+
+        if not threads:
+            logger.info("Page %d: no threads found, stopping.", page_number)
+            break
+
+        logger.info("Page %d: fetched %d thread(s).", page_number, len(threads))
+
+        for thread_meta in threads:
+            thread = (
+                service.users()
+                .threads()
+                .get(userId="me", id=thread_meta["id"], format="metadata")
+                .execute()
+            )
+            messages = thread.get("messages", [])
+
+            for message in messages:
+                # TODO: process each message (e.g. classify, label, store)
+                logger.debug(
+                    "Thread %s — message %s", thread_meta["id"], message.get("id")
+                )
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            logger.info("All pages processed. Total pages: %d.", page_number)
+            break

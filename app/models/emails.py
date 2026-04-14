@@ -24,3 +24,8 @@ class LabelsSyncResponse(BaseModel):
     total: int
     already_existed: int
     newly_created: int
+
+
+class ThreadSyncResponse(BaseModel):
+    message: str
+    status: str
