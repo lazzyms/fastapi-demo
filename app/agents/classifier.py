@@ -23,8 +23,6 @@ from app.core.config import settings, CUSTOM_GMAIL_LABELS
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "claude-3-5-haiku-20241022"
-
 GmailLabel = Literal["action_needed", "fyi", "unimportant", "predicted_spam"]
 
 
@@ -35,7 +33,7 @@ class LabelOutput(BaseModel):
 
 def _get_llm() -> ChatAnthropic:
     return ChatAnthropic(
-        model=MODEL_NAME,
+        model=settings.model_name,
         api_key=settings.anthropic_api_key,
         max_tokens=512,
     )

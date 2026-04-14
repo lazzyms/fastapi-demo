@@ -24,12 +24,11 @@ from app.schemas.emails import ThreadMessage
 logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 10
-MODEL_NAME = "claude-3-5-haiku-20241022"
 
 
 def _get_llm() -> ChatAnthropic:
     return ChatAnthropic(
-        model=MODEL_NAME,
+        model=settings.model_name,
         api_key=settings.anthropic_api_key,
         max_tokens=2048,
     )
