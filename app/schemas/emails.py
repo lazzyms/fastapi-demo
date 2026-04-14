@@ -47,3 +47,24 @@ class ThreadProcessingResult(BaseModel):
     summary: str
     label: str
     label_id: Optional[str] = None
+
+
+class PubSubMessage(BaseModel):
+    """A single Pub/Sub push message as sent by Google Cloud."""
+
+    message_id: str
+    data: str  # base64-encoded {"emailAddress": ..., "historyId": ...}
+    publish_time: str
+    attributes: Optional[dict] = None
+
+
+class PubSubWebhookPayload(BaseModel):
+    """Outer envelope of a Gmail Pub/Sub push notification."""
+
+    message: PubSubMessage
+    subscription: str
+
+
+class WebhookAcceptedResponse(BaseModel):
+    message: str
+    status: str

@@ -191,6 +191,47 @@ def apply_label_to_thread(service: Any, thread_id: str, label_id: str) -> dict:
     )
 
 
+def fetch_history_since(service: Any, start_history_id: str) -> list[str]:
+    """Return unique thread IDs for messages added since start_history_id.
+
+    Uses the Gmail History API with historyTypes=messageAdded so we only
+    react to new incoming messages, not label changes or deletions.
+    """
+    thread_ids: list[str] = []
+    seen: set[str] = set()
+    page_token: str | None = None
+
+    while True:
+        request_kwargs: dict = {
+            "userId": "me",
+            "startHistoryId": start_history_id,
+            "historyTypes": ["messageAdded"],
+        }
+        if page_token:
+            request_kwargs["pageToken"] = page_token
+
+        try:
+            response = service.users().history().list(**request_kwargs).execute()
+        except HttpError as exc:
+            logger.error(
+                "History API error (startHistoryId=%s): %s", start_history_id, exc
+            )
+            break
+
+        for history_record in response.get("history", []):
+            for msg_added in history_record.get("messagesAdded", []):
+                tid = msg_added.get("message", {}).get("threadId")
+                if tid and tid not in seen:
+                    seen.add(tid)
+                    thread_ids.append(tid)
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    return thread_ids
+
+
 def fetch_threads_last_10_days(service: Any) -> None:
     """Paginate through all Gmail threads from the last 10 days and process each message.
 
