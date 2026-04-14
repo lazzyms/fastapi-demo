@@ -28,6 +28,7 @@ def process_thread(
     service: Any,
     thread_id: str,
     raw_messages: list[dict],
+    label_name_map: dict[str, str] | None = None,
 ) -> ThreadProcessingResult:
     """Summarize a thread, classify it, and apply the Gmail label.
 
@@ -37,8 +38,10 @@ def process_thread(
     Args:
         service:      Authenticated Gmail API service (from get_gmail_service()).
         thread_id:    Gmail thread ID string.
-        raw_messages: List of raw message dicts returned by the Gmail API
-                      (format="full" — must include payload/headers/body).
+        raw_messages:   List of raw message dicts returned by the Gmail API
+                (format="full" — must include payload/headers/body).
+        label_name_map: Optional cache of Gmail label name -> label ID to avoid
+                repeated labels.list API calls.
 
     Returns:
         ThreadProcessingResult with the summary, assigned label, and label_id.
@@ -46,7 +49,10 @@ def process_thread(
     logger.info("Processing thread %s (%d messages)", thread_id, len(raw_messages))
 
     # 1. Extract structured content from raw Gmail message dicts
-    messages = [extract_message_content(m) for m in raw_messages]
+    messages = [
+        extract_message_content(message, position=index)
+        for index, message in enumerate(raw_messages, start=1)
+    ]
 
     # Sort by position to guarantee chronological order
     messages.sort(key=lambda m: m.position)
@@ -60,7 +66,7 @@ def process_thread(
     label = run_classifier(summary)
 
     # 4. Resolve the label ID and apply it to the thread
-    label_id = get_label_id_by_name(service, label)
+    label_id = get_label_id_by_name(service, label, label_name_map=label_name_map)
 
     if label_id:
         apply_label_to_thread(service, thread_id, label_id)

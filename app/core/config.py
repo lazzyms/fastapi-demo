@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # Gmail
     google_api_key: str = ""
+    webhook_secret: str = ""
 
     # Anthropic
     anthropic_api_key: str = ""

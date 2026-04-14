@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GmailLabelResponse(BaseModel):
@@ -47,3 +47,26 @@ class ThreadProcessingResult(BaseModel):
     summary: str
     label: str
     label_id: Optional[str] = None
+
+
+class PubSubMessage(BaseModel):
+    """A single Pub/Sub push message as sent by Google Cloud."""
+
+    message_id: str = Field(alias="messageId")
+    data: str  # base64-encoded {"emailAddress": ..., "historyId": ...}
+    publish_time: str = Field(alias="publishTime")
+    attributes: Optional[dict] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class PubSubWebhookPayload(BaseModel):
+    """Outer envelope of a Gmail Pub/Sub push notification."""
+
+    message: PubSubMessage
+    subscription: str
+
+
+class WebhookAcceptedResponse(BaseModel):
+    message: str
+    status: str
